@@ -128,9 +128,7 @@ class Ant:
 		self.hasIceMode = 0
 		self.iceFinder = 0
 
-	def setModes(self, huntingForIceOffPathMode, onGoalPathToIceMode, discoveredIceMode,
-							 obtainingIceMode, goingHomeWithIceMode, goingHomeWithoutIceMode, needsToRechargeMode,
-							 isHomeMode):
+	def setModes(self, huntingForIceOffPathMode, onGoalPathToIceMode, discoveredIceMode, obtainingIceMode, goingHomeWithIceMode, goingHomeWithoutIceMode, needsToRechargeMode, isHomeMode):
 		"""
 		Sets the behavioral mode flags for the ant.
 
@@ -172,8 +170,7 @@ class Ant:
 		"""
 
 		TURN_SIZE = 5
-		self.direction += random.choice(
-			[-TURN_SIZE, 0, TURN_SIZE])  # this is how the ants should move per assignment description
+		self.direction += random.choice([-TURN_SIZE, 0, TURN_SIZE])  # this is how the ants should move per assignment description
 		if self.direction > 360:
 			self.direction -= 360
 		self.xPosition += self.distanceTravelled * math.cos(self.direction)
@@ -225,10 +222,8 @@ class Ant:
 		xCurrent = self.xPosition  # set the x position of the ant to temporary variable
 		yCurrent = self.yPosition  # set the y position of the ant to temporary variable
 		currentAngle = math.degrees(math.atan2(yCurrent, xCurrent))  # find the current angle of the ant
-		targetAngle = math.degrees(math.atan2(yNext - yCurrent,
-																					xNext - xCurrent))  # find the angle between the direction the ant is facing and the ice
-		angleDifference = (
-													targetAngle - currentAngle + 180) % 360 - 180  # find the difference between the target angle and the current angle
+		targetAngle = math.degrees(math.atan2(yNext - yCurrent, xNext - xCurrent))  # find the angle between the direction the ant is facing and the ice
+		angleDifference = (targetAngle - currentAngle + 180) % 360 - 180  # find the difference between the target angle and the current angle
 		if angleDifference > 0:
 			self.direction += angleDifference  # turn right towards the target location (xNext, yNext)
 		else:
@@ -271,11 +266,9 @@ class Ant:
 				self.returnPath.append(MicroDot(Lander.xPosition, Lander.yPosition))  # add Lander to return path
 				self.turnToPoint(self.returnPath[1].xPosition, self.returnPath[1].yPosition)  # turn ant around to previous dot
 			for dot in range(len(self.returnPath)):  # for each dot in the return microdot stack
-				if self.xPosition == self.returnPath[dot].xPosition and self.yPosition == self.returnPath[
-					dot].yPosition:  # if you're at a return dot
+				if self.xPosition == self.returnPath[dot].xPosition and self.yPosition == self.returnPath[dot].yPosition:  # if you're at a return dot
 					if dot + 1 < len(self.returnPath):  # if you're not at the last return dot
-						self.moveToPoint(self.returnPath[dot + 1].xPosition, self.returnPath[dot + 1].yPosition, lock,
-														 positions)  # moves ant to next dot
+						self.moveToPoint(self.returnPath[dot + 1].xPosition, self.returnPath[dot + 1].yPosition, lock, positions)  # moves ant to next dot
 					else:
 						self.moveToPoint(Lander.xPosition, Lander.yPosition, lock, positions)  # move to the Lander
 						print(f"Ant {self.id} has returned home\n")
@@ -284,11 +277,9 @@ class Ant:
 		else:
 			print(f"Ant {self.id} is going home with Ice\n")
 			for dot in range(len(goalMicroDotsToHome)):  # for each dot in the return microdot stack
-				if self.xPosition == goalMicroDotsToHome[dot].xPosition and self.yPosition == goalMicroDotsToHome[
-					dot].yPosition:  # if you're at a return dot
+				if self.xPosition == goalMicroDotsToHome[dot].xPosition and self.yPosition == goalMicroDotsToHome[dot].yPosition:  # if you're at a return dot
 					if dot + 1 < len(goalMicroDotsToHome):
-						self.moveToPoint(goalMicroDotsToHome[dot + 1].xPosition, goalMicroDotsToHome[dot + 1].yPosition, lock,
-														 positions)  # moves ant to next dot
+						self.moveToPoint(goalMicroDotsToHome[dot + 1].xPosition, goalMicroDotsToHome[dot + 1].yPosition, lock, positions)  # moves ant to next dot
 					else:
 						self.moveToPoint(Lander.xPosition, Lander.yPosition, lock, positions)  # move to the Lander
 						print(f"Ant {self.id} has returned home\n")
@@ -333,13 +324,11 @@ def antMovement(Ant, lock, positions):
 	while Ant.isHomeMode == 0:
 		Ant.direction = random.randint(0, 360)
 		Ant.move(lock, positions)
-		while Ant.distanceTravelled < 20 or (
-				Ant.xPosition != 0 or Ant.yPosition != 0) and Ant.isHomeMode == 0 and Ant.pathHistory != []:
+		while Ant.distanceTravelled < 20 or (Ant.xPosition != 0 or Ant.yPosition != 0) and Ant.isHomeMode == 0 and Ant.pathHistory != []:
 			while Ant.distanceTravelled < 500:
 				if Ant.huntingForIceOffPathMode == 1:  # if ant is hunting for ice off path
 					Ant.move(lock, positions)  # moves ant in a random direction
-					distanceToIce = math.hypot(Ant.xPosition - Ice.xPosition,
-																		 Ant.yPosition - Ice.yPosition)  # checks if ant is in range of ice
+					distanceToIce = math.hypot(Ant.xPosition - Ice.xPosition, Ant.yPosition - Ice.yPosition)  # checks if ant is in range of ice
 					if distanceToIce <= Ice.radius + 10:  # if ant is in range of ice
 						if Ice.found == 0:  # if ice has not been found yet
 							Ice.found = 1  # set ice.found to 1
@@ -349,18 +338,15 @@ def antMovement(Ant, lock, positions):
 							Ant.obtainingIceMode = 1  # obtainingIceMode = 1 (gets ice, returns to spot where it detected ice, and adds it on goal return path)
 					else:  # if not in range of ice
 						for dot in range(len(goalMicroDotsToIce)):  # checks if ant is in range of goal dot
-							distanceToGoalDot = math.hypot(Ant.xPosition - goalMicroDotsToIce[dot].xPosition,
-																						 Ant.yPosition - goalMicroDotsToIce[dot].yPosition)
+							distanceToGoalDot = math.hypot(Ant.xPosition - goalMicroDotsToIce[dot].xPosition, Ant.yPosition - goalMicroDotsToIce[dot].yPosition)
 							if distanceToGoalDot <= 2:  # if in range of goal dot
-								Ant.moveToPoint(goalMicroDotsToIce[dot].xPosition,
-																goalMicroDotsToIce[dot].yPosition)  # moves ant to goal dot
+								Ant.moveToPoint(goalMicroDotsToIce[dot].xPosition, goalMicroDotsToIce[dot].yPosition)  # moves ant to goal dot
 								Ant.onGoalPathToIceMode = 1  # onGoalPathToIceMode = 1 (turns ant to path, puts ant on the path)
 							else:  # if not in range of goal dot
 								Ant.huntingForIceOffPathMode = 1  # huntingForIceOffPathMode = 1 (moves ant in a random direction)
 
 				if Ant.discoveredIceMode == 1:
-					Ant.turnToPoint(Ant.pathHistory[-2].xPosition,
-													Ant.pathHistory[-2].yPosition)  # turn ant around to previous dot
+					Ant.turnToPoint(Ant.pathHistory[-2].xPosition, Ant.pathHistory[-2].yPosition)  # turn ant around to previous dot
 					goalMicroDotsToIce.append(MicroDot(20, -30))  # adds ice to goal microdot stack
 					goalMicroDotsToHome.append(MicroDot(20, -30))  # adds dot to goal microdot to home list
 					Ant.dropGoalMicroDot()  # adds ice to goal microdot stack
@@ -369,10 +355,8 @@ def antMovement(Ant, lock, positions):
 
 				if Ant.onGoalPathToIceMode == 1:
 					for dot in range(len(goalMicroDotsToIce)):
-						if Ant.xPosition != goalMicroDotsToIce[-1].xPosition and Ant.yPosition != goalMicroDotsToIce[
-							-1].yPosition:  # if you are at a goal dot, and not at the last goal dot
-							Ant.moveToPoint(goalMicroDotsToIce[dot + 1].xPosition,
-															goalMicroDotsToIce[dot + 1].yPosition)  # moves ant to goal dot
+						if Ant.xPosition != goalMicroDotsToIce[-1].xPosition and Ant.yPosition != goalMicroDotsToIce[-1].yPosition:  # if you are at a goal dot, and not at the last goal dot
+							Ant.moveToPoint(goalMicroDotsToIce[dot + 1].xPosition, goalMicroDotsToIce[dot + 1].yPosition)  # moves ant to goal dot
 							print(f"Ant {Ant.id} is moving onto Goal Path\n")
 						else:  # if you are at the last goal dot (ice @ 20,-30)
 							Ant.setModes(0, 0, 0, 1, 0, 0, 0, 0)  # set modes to 0 except obtainingIceMode = 1
@@ -385,22 +369,17 @@ def antMovement(Ant, lock, positions):
 					Ant.obtainingIceMode = 0  # set obtainingIceMode to 0
 					Ice.quantity -= 1  # subtract 1 from the ice quantity
 					if len(goalMicroDotsToHome) > 1:  # Check if there are at least 2 elements
-						Ant.turnToPoint(goalMicroDotsToHome[1].xPosition,
-														goalMicroDotsToHome[1].yPosition)  # turn around to your last dot that is not the ice
-						Ant.moveToPoint(goalMicroDotsToHome[1].xPosition, goalMicroDotsToHome[1].yPosition, lock,
-														positions)  # move to the previous dot
+						Ant.turnToPoint(goalMicroDotsToHome[1].xPosition, goalMicroDotsToHome[1].yPosition)  # turn around to your last dot that is not the ice
+						Ant.moveToPoint(goalMicroDotsToHome[1].xPosition, goalMicroDotsToHome[1].yPosition, lock, positions)  # move to the previous dot
 					Ant.setModes(0, 0, 0, 0, 1, 0, 0, 0)  # set modes to 0 except goingHomeWithIceMode = 1
 
 				if Ant.goingHomeWithIceMode == 1:
-					if Ant.xPosition == goalMicroDotsToHome[-1].xPosition and Ant.yPosition == goalMicroDotsToHome[
-						-1].yPosition:  # if you're at the last return dot
+					if Ant.xPosition == goalMicroDotsToHome[-1].xPosition and Ant.yPosition == goalMicroDotsToHome[-1].yPosition:  # if you're at the last return dot
 						Ant.setModes(0, 0, 0, 0, 0, 0, 0, 1)  # set modes to 0 except isHomeMode = 1
 					else:
 						for dot in range(len(goalMicroDotsToHome)):  # for each dot in the return microdot stack
-							if Ant.xPosition == goalMicroDotsToHome[dot].xPosition and Ant.yPosition == goalMicroDotsToHome[
-								dot].yPosition and Ant.xPosition != Lander.xPosition and Ant.yPosition != Lander.yPosition:  # if you're at a return dot and not at the last return dot
-								Ant.moveToPoint(goalMicroDotsToHome[dot + 1].xPosition,
-																goalMicroDotsToHome[dot + 1].yPosition)  # moves ant to goal dot
+							if Ant.xPosition == goalMicroDotsToHome[dot].xPosition and Ant.yPosition == goalMicroDotsToHome[dot].yPosition and Ant.xPosition != Lander.xPosition and Ant.yPosition != Lander.yPosition:  # if you're at a return dot and not at the last return dot
+								Ant.moveToPoint(goalMicroDotsToHome[dot + 1].xPosition, goalMicroDotsToHome[dot + 1].yPosition)  # moves ant to goal dot
 							else:
 								Ant.moveToPoint(Lander.xPosition, Lander.yPosition)  # moves ant to home
 								Ant.isHomeMode = 1  # set isHomeMode to 1
