@@ -1,431 +1,246 @@
-# ASSUMPTIONS MADE:
-# The things I had to assume for this assignment are that:
-# if an ant discovers the Ice, it does not pick up the ice (it puts the ice's location on the goal path and goes home)
-# there are no obstacles on the land because the instructions never said where to put the obstacles
-# the minutes it would take to hunt for the ice and come back to the lander is equal to the meters traveled
+"""
+===============================================================================
+ File:        antBiomodeling.py
+ Author:      Dom Scordino
+ Created:     2025-04-13
+ Description:
+   Simulates a swarm of autonomous "ant" robots exploring the Moon's surface
+   to locate and retrieve an ice deposit. Each ant:
+     - Moves with randomized direction adjustments.
+     - Leaves behind microdot markers as it explores.
+     - Picks up ice when within detection range.
+     - Returns along its original path to deliver ice back to the lander.
+     - Marks its return path as a goal trail others can follow.
+===============================================================================
+"""
 
-import random
 import math
-import time
-from collections import deque
-import threading
+import random
 import matplotlib.pyplot as plt
 
-global goalMicroDots
-global IceFinder
-global returnHomeMicroDots
+# -----------------------------------------------------------------------------
+# Simulation Constants
+# -----------------------------------------------------------------------------
 
+NUM_ANTS = 20                         # Number of autonomous ants in the swarm
+MAX_DISTANCE = 100                   # Max distance each ant can travel from lander (in meters)
+MAX_STEPS = 1000                     # Safety cap on steps per ant
+ANT_SPEED = 1                        # Distance covered per step (in meters)
+ICE_LOCATION = (9, -9)             # (x, y) coordinates of the ice deposit
+ICE_RADIUS = 1.0                     # Radius of the ice deposit
+ICE_DETECTION_RANGE = 4             # Detection buffer range around the ice
+DEGREES = [-3, 0, 3]                 # Angular deviations from current heading (degrees)
+LOG_FILENAME = "ant_movements.log"  # File to record ant behavior
 
-class MicroDot:
-	"""
-	Represents a coordinate point in 2D space that an ant visits.
+# -----------------------------------------------------------------------------
+# Classes
+# -----------------------------------------------------------------------------
 
-	Attributes:
-	xPosition (float): The x-coordinate of the microdot.
-	yPosition (float): The y-coordinate of the microdot.
-
-	Used for:
-	- Storing path history of ants.
-	- Defining waypoints for navigation.
-	"""
-
-	def __init__(self, xPosition, yPosition):
-		self.xPosition = xPosition
-		self.yPosition = yPosition
-
-
-class Lander:
-	"""
-	Represents the base or home location for all ants.
-
-	Attributes:
-	    xPosition (int): The fixed x-coordinate of the lander (always 0).
-	    yPosition (int): The fixed y-coordinate of the lander (always 0).
-	    ants (list): A list of Ant objects deployed from this lander.
-
-	Used for:
-	    - The origin and return destination for ants.
-	    - Housing and launching ants into the simulation.
-	"""
-
-	def __init__(self):
-		self.xPosition = 0
-		self.yPosition = 0
-		self.ants = []
-
-
-class Ice:
-	"""
-	Represents the ice resource that ants must find and report.
-
-	Attributes:
-	    xPosition (float): The x-coordinate of the ice.
-	    yPosition (float): The y-coordinate of the ice.
-	    radius (int): The detection radius within which ants can discover the ice.
-	    quantity (int): The number of ice pieces available to be collected.
-	    found (int): Flag indicating whether the ice has already been discovered (0 = no, 1 = yes).
-
-	Used for:
-	    - Ants to detect and report the location.
-	    - Triggering goal path behavior in the simulation.
-	"""
-
-	def __init__(self, xPosition=20, yPosition=-30):
-		self.xPosition = xPosition
-		self.yPosition = yPosition
-		self.radius = 1
-		self.quantity = ICE_QUANTITY
-		self.found = 0
+class Microdot:
+    """
+    Represents a microdot marker dropped by an ant during exploration.
+    These serve as breadcrumbs and are upgraded to goal trail markers after
+    an ant discovers ice and returns.
+    """
+    def __init__(self, pos, is_goal=False):
+        self.pos = pos                  # (x, y) coordinates
+        self.is_goal = is_goal          # True if part of a goal trail
+        self.to_ice = None              # Vector or hint to ice location
+        self.to_lander = None           # Vector or hint back to lander
 
 
 class Ant:
-	"""
-	Represents an autonomous agent (ant) that searches for ice and returns to the lander.
+    """
+    Models an autonomous ant exploring for ice and returning it to base.
+    Ants use a randomized movement pattern and retrace their own paths after
+    discovering ice. The first discoverer creates a goal trail others could use.
+    """
+    def __init__(self, id, lander_pos=(0, 0)):
+        self.id = id
+        self.lander_pos = lander_pos
+        self.pos = lander_pos
+        self.path = [lander_pos]             # Path taken during exploration
+        self.retrieval_path = []             # Reverse of path to ice
+        self.microdots = []                  # Markers dropped along path
+        self.goal_path = []                  # Return path, marked as goal trail
+        self.direction = random.randint(0, 359)
+        self.distance_traveled = 0
+        self.mode = "search"                 # 'search', 'return', 'idle', or 'lost'
+        self.is_carrying_ice = False
+        self.has_delivered_ice = False
+        self.lost = False
 
-	Attributes:
-	    xPosition (float): The ant's current x-coordinate.
-	    yPosition (float): The ant's current y-coordinate.
-	    id (int): Unique identifier for the ant.
-	    direction (float): Current angle (in degrees) that the ant is facing.
-	    distanceTravelled (int): Total number of moves taken by the ant.
-	    pathHistory (list of MicroDot): Trail of microdots showing the ant's movement history.
-	    returnPath (list of MicroDot): Reverse path generated when returning to the lander.
+    def move(self, log_file):
+        """
+        Perform one unit of movement in the current direction.
+        Updates position, drops a microdot, checks for ice detection.
+        """
+        if self.mode in ["lost", "return", "idle"]:
+            return
 
-	    # Behavior Flags (mode values 0 or 1):
-	    huntingForIceOffPathMode (int): Random search mode.
-	    onGoalPathToIceMode (int): Ant is following known path to ice.
-	    discoveredIceMode (int): Ant just discovered the ice and is about to mark it.
-	    obtainingIceMode (int): Ant is navigating directly to the ice to collect it.
-	    goingHomeWithIceMode (int): Ant is returning to the lander with collected ice.
-	    goingHomeWithoutIceMode (int): Ant is returning to the lander without ice.
-	    needsToRechargeMode (int): Placeholder for future energy exhaustion feature.
-	    isHomeMode (int): Indicates if the ant has finished its journey and returned home.
-	    hasIceMode (int): Whether the ant currently possesses ice.
-	    iceFinder (int): Flag to indicate if this ant was the first to discover the ice.
+        # Abort if too far or out of range
+        if self.distance_traveled >= MAX_DISTANCE:
+            if self.distance_from(ICE_LOCATION) > 100:
+                self.mode = "lost"
+                self.lost = True
+            return
 
-	Used for:
-	    - Navigating the simulation space.
-	    - Interacting with the ice resource and environment.
-	    - Coordinating shared behavior through goal paths and discovery logic.
-	"""
+        # Slight angular deviation (left, right, or straight)
+        angle_change = random.choice(DEGREES)
+        self.direction = (self.direction + angle_change) % 360
+        rad = math.radians(self.direction)
 
-	def __init__(self, xPosition, yPosition, id):
-		self.xPosition = xPosition
-		self.yPosition = yPosition
-		self.id = id
-		self.direction = 0
-		self.distanceTravelled = 0
-		self.pathHistory = []
-		self.returnPath = []
-		self.huntingForIceOffPathMode = 1
-		self.onGoalPathToIceMode = 0
-		self.discoveredIceMode = 0
-		self.obtainingIceMode = 0
-		self.goingHomeWithIceMode = 0
-		self.goingHomeWithoutIceMode = 0
-		self.needsToRechargeMode = 0
-		self.isHomeMode = 0
-		self.hasIceMode = 0
-		self.iceFinder = 0
+        # Compute new (x, y) position
+        dx = ANT_SPEED * math.cos(rad)
+        dy = ANT_SPEED * math.sin(rad)
+        new_pos = (self.pos[0] + dx, self.pos[1] + dy)
 
-	def setModes(self, huntingForIceOffPathMode, onGoalPathToIceMode, discoveredIceMode, obtainingIceMode, goingHomeWithIceMode, goingHomeWithoutIceMode, needsToRechargeMode, isHomeMode):
-		"""
-		Sets the behavioral mode flags for the ant.
+        # Update state
+        self.pos = new_pos
+        self.path.append(new_pos)
+        self.microdots.append(Microdot(new_pos))
+        self.distance_traveled += ANT_SPEED
+        log_file.write(f"Ant {self.id} moved to {self.pos}\n")
 
-		Parameters:
-		    huntingForIceOffPathMode (int): 1 if the ant is randomly searching for ice.
-		    onGoalPathToIceMode (int): 1 if the ant is following a known path to the ice.
-		    discoveredIceMode (int): 1 if the ant has just discovered the ice.
-		    obtainingIceMode (int): 1 if the ant is currently going to collect ice.
-		    goingHomeWithIceMode (int): 1 if the ant is returning home with ice.
-		    goingHomeWithoutIceMode (int): 1 if the ant is returning home without ice.
-		    needsToRechargeMode (int): 1 if the ant needs to recharge (not used in logic).
-		    isHomeMode (int): 1 if the ant has completed its mission and returned home.
+        # Check for ice detection
+        if self.detect_ice():
+            self.pickup_ice(log_file)
 
-		Purpose:
-		    Updates all internal mode flags to reflect the ant’s current behavioral state.
-		"""
+        # Mark as lost if wandered too far from ice
+        if self.distance_from(ICE_LOCATION) > 100:
+            self.mode = "lost"
+            self.lost = True
+            log_file.write(f"Ant {self.id} is lost\n")
 
-		self.huntingForIceOffPathMode = huntingForIceOffPathMode
-		self.onGoalPathToIceMode = onGoalPathToIceMode
-		self.discoveredIceMode = discoveredIceMode
-		self.obtainingIceMode = obtainingIceMode
-		self.goingHomeWithIceMode = goingHomeWithIceMode
-		self.goingHomeWithoutIceMode = goingHomeWithoutIceMode
-		self.needsToRechargeMode = needsToRechargeMode
-		self.isHomeMode = isHomeMode
+    def move_home(self):
+        """
+        Follows the ant's recorded path back to the lander.
+        Called after the ant has picked up ice.
+        """
+        if self.mode != "return":
+            return
 
-	def move(self, lock, positions):
-		"""
-		Moves the ant in a random direction and records its position.
+        if not self.retrieval_path:
+            self.pos = self.lander_pos
+            self.deliver_ice()
+            return
 
-		Parameters:
-		    lock (threading.Lock): A lock used to ensure thread-safe access to shared data.
-		    positions (dict): A shared dictionary tracking each ant's movement coordinates.
+        self.pos = self.retrieval_path.pop(0)
+        self.path.append(self.pos)
 
-		Behavior:
-		    - Turns randomly by ±5 degrees or not at all.
-		    - Moves one unit in the current direction.
-		    - Appends current position to path history and shared position log.
-		"""
+    def detect_ice(self):
+        """
+        Returns True if ant is within detection range of the ice deposit.
+        """
+        return self.distance_from(ICE_LOCATION) <= (ICE_RADIUS + ICE_DETECTION_RANGE)
 
-		TURN_SIZE = 5
-		self.direction += random.choice([-TURN_SIZE, 0, TURN_SIZE])  # this is how the ants should move per assignment description
-		if self.direction > 360:
-			self.direction -= 360
-		self.xPosition += self.distanceTravelled * math.cos(self.direction)
-		self.yPosition += self.distanceTravelled * math.sin(self.direction)
-		self.pathHistory.append(MicroDot(self.xPosition, self.yPosition))  # records microdot to path history
-		with lock:  # lock the positions list
-			positions[self.id].append((self.xPosition, self.yPosition))  # adds ant position to positions list
-			print(f"Ant {self.id} is at {self.xPosition}, {self.yPosition}\n")  # prints ant position
-		self.distanceTravelled += 1
+    def pickup_ice(self, log_file):
+        """
+        Triggers when an ant reaches the ice. Sets return mode and builds retrieval path.
+        """
+        log_file.write(f"Ant {self.id} picked up ice at {self.pos}\n")
+        self.is_carrying_ice = True
+        self.mode = "return"
+        self.retrieval_path = list(reversed(self.path))
+        self.mark_goal_trail()
 
-	def moveToPoint(self, xGoalDot, yGoalDot, lock, positions):  # moves ant to goal dot
-		"""
-		Moves the ant directly to a specified coordinate point.
+    def deliver_ice(self):
+        """
+        Completes the ant’s mission by delivering the ice to the lander.
+        """
+        if self.is_carrying_ice and self.pos == self.lander_pos:
+            self.has_delivered_ice = True
+            self.is_carrying_ice = False
+            self.mode = "idle"
 
-		Parameters:
-		    xGoalDot (float): The x-coordinate of the target point.
-		    yGoalDot (float): The y-coordinate of the target point.
-		    lock (threading.Lock): A lock used to ensure thread-safe access to shared data.
-		    positions (dict): A shared dictionary tracking each ant's movement coordinates.
+    def mark_goal_trail(self):
+        """
+        Converts the retrieval path into a visible goal trail for visualization
+        or future extension into collaborative trail-following behavior.
+        """
+        for pos in self.retrieval_path:
+            dot = Microdot(pos, is_goal=True)
+            dot.to_ice = ICE_LOCATION
+            dot.to_lander = self.lander_pos
+            self.goal_path.append(dot)
 
-		Behavior:
-		    - Rotates the ant to face the target.
-		    - Updates the ant’s position directly to the given point.
-		    - Records the position in both local and shared history.
-		"""
-
-		self.turnToPoint(xGoalDot, yGoalDot)  # turn ant towards goal dot
-		self.xPosition = xGoalDot  # move your xPosition to the goal dot
-		self.yPosition = yGoalDot  # move your yPosition to the goal dot
-		self.pathHistory.append(MicroDot(self.xPosition, self.yPosition))  # records microdot to path history
-		with lock:
-			positions[self.id].append((self.xPosition, self.yPosition))  # adds ant position to positions list
-			print(f"Ant {self.id} is at {self.xPosition}, {self.yPosition}\n")  # prints ant position
-		self.distanceTravelled += 1  # add to accumulator
-
-	def turnToPoint(self, xNext, yNext):
-		"""
-		Rotates the ant to face toward a specific point in space.
-
-		Parameters:
-		    xNext (float): The x-coordinate of the point to face.
-		    yNext (float): The y-coordinate of the point to face.
-
-		Behavior:
-		    - Calculates the directional angle between the ant's current location and the target.
-		    - Adjusts the ant’s `direction` to point toward that location.
-		"""
-
-		xCurrent = self.xPosition  # set the x position of the ant to temporary variable
-		yCurrent = self.yPosition  # set the y position of the ant to temporary variable
-		currentAngle = math.degrees(math.atan2(yCurrent, xCurrent))  # find the current angle of the ant
-		targetAngle = math.degrees(math.atan2(yNext - yCurrent, xNext - xCurrent))  # find the angle between the direction the ant is facing and the ice
-		angleDifference = (targetAngle - currentAngle + 180) % 360 - 180  # find the difference between the target angle and the current angle
-		if angleDifference > 0:
-			self.direction += angleDifference  # turn right towards the target location (xNext, yNext)
-		else:
-			self.direction -= angleDifference  # turn left towards the target location (xNext, yNext)
-
-	def dropGoalMicroDot(self):
-		"""
-		Drops a microdot at the ant's current position for path tracing.
-
-		Effects:
-		    - Appends the current location to both `goalMicroDotsToIce` and `goalMicroDotsToHome`.
-		    - Also records the location in the ant's own `pathHistory`.
-
-		Purpose:
-		    Marks significant locations that can later be used for goal-oriented navigation by other ants.
-		"""
-
-		goalMicroDotsToIce.append(MicroDot(self.xPosition, self.yPosition))  # adds ice to goal microdot stack
-		goalMicroDotsToHome.append(MicroDot(self.xPosition, self.yPosition))  # adds ant to goal microdot to home list
-		self.pathHistory.append(MicroDot(self.xPosition, self.yPosition))  # records microdot to path history
-
-	def goingHome(self):
-		"""
-		Navigates the ant back to the lander, either with or without ice.
-
-		Behavior:
-		    - If the ant has no ice, it retraces its own path in reverse to return.
-		    - If the ant has ice, it follows the shared `goalMicroDotsToHome` path.
-		    - Each movement step is recorded and synchronized with the global position log.
-
-		Effects:
-		    - Sets the `isHomeMode` flag to 1 once the ant reaches the lander.
-		    - Updates mode flags accordingly to reflect completion of the journey.
-		"""
-
-		if self.hasIceMode == 0:  # if ant does not have ice
-			print(f"Ant {self.id} is going home without Ice\n")
-			if not self.returnPath:  # if return path is empty
-				self.returnPath = self.pathHistory[::-1]  # create return path from path history
-				self.returnPath.append(MicroDot(Lander.xPosition, Lander.yPosition))  # add Lander to return path
-				self.turnToPoint(self.returnPath[1].xPosition, self.returnPath[1].yPosition)  # turn ant around to previous dot
-			for dot in range(len(self.returnPath)):  # for each dot in the return microdot stack
-				if self.xPosition == self.returnPath[dot].xPosition and self.yPosition == self.returnPath[dot].yPosition:  # if you're at a return dot
-					if dot + 1 < len(self.returnPath):  # if you're not at the last return dot
-						self.moveToPoint(self.returnPath[dot + 1].xPosition, self.returnPath[dot + 1].yPosition, lock, positions)  # moves ant to next dot
-					else:
-						self.moveToPoint(Lander.xPosition, Lander.yPosition, lock, positions)  # move to the Lander
-						print(f"Ant {self.id} has returned home\n")
-						self.setModes(0, 0, 0, 0, 0, 0, 0, 1)  # set modes to 0 except isHomeMode = 1
-						break
-		else:
-			print(f"Ant {self.id} is going home with Ice\n")
-			for dot in range(len(goalMicroDotsToHome)):  # for each dot in the return microdot stack
-				if self.xPosition == goalMicroDotsToHome[dot].xPosition and self.yPosition == goalMicroDotsToHome[dot].yPosition:  # if you're at a return dot
-					if dot + 1 < len(goalMicroDotsToHome):
-						self.moveToPoint(goalMicroDotsToHome[dot + 1].xPosition, goalMicroDotsToHome[dot + 1].yPosition, lock, positions)  # moves ant to next dot
-					else:
-						self.moveToPoint(Lander.xPosition, Lander.yPosition, lock, positions)  # move to the Lander
-						print(f"Ant {self.id} has returned home\n")
-						self.setModes(0, 0, 0, 0, 0, 0, 0, 1)  # set modes to 0 except isHomeMode = 1
-						break
+    def distance_from(self, point):
+        """
+        Utility method to compute Euclidean distance from current position.
+        """
+        return math.dist(self.pos, point)
 
 
-def antMovement(Ant, lock, positions):
-	"""
-	Simulates the full behavioral lifecycle of a single ant in the environment.
+# -----------------------------------------------------------------------------
+# Simulation Execution
+# -----------------------------------------------------------------------------
 
-	This function governs how an ant:
-	- Randomly explores the environment in search of ice.
-	- Detects the ice and records its location.
-	- Follows known goal paths to reach the ice.
-	- Collects ice and returns home using either its own path or a shared goal path.
-	- Logs its position in a shared dictionary for visualization and tracking.
+# Initialize all ant agents
+ants = [Ant(i) for i in range(NUM_ANTS)]
 
-	Parameters:
-	    Ant (Ant): The ant object to simulate.
-	    lock (threading.Lock): A threading lock used to safely update shared data structures.
-	    positions (dict): A shared dictionary mapping ant IDs to their list of visited (x, y) coordinates.
+with open(LOG_FILENAME, "w") as log_file:
+    # Search Phase
+    for ant in ants:
+        steps = 0
+        while ant.mode == "search" and steps < MAX_STEPS:
+            ant.move(log_file)
+            steps += 1
 
-	Behavior Modes:
-	    - huntingForIceOffPathMode: Randomly walks in search of ice.
-	    - discoveredIceMode: First discoverer drops a microdot and returns.
-	    - onGoalPathToIceMode: Follows known path toward the ice.
-	    - obtainingIceMode: Collects ice if available.
-	    - goingHomeWithIceMode: Returns home along shared goal path.
-	    - goingHomeWithoutIceMode: Returns home by retracing path history.
+    log_file.write("=== Beginning return phase ===\n")
 
-	Loop Exit:
-	    - Simulation ends for the ant when isHomeMode is set to 1.
-
-	Effects:
-	    - Updates global path structures (goalMicroDotsToIce and goalMicroDotsToHome).
-	    - Decrements Ice.quantity when ice is collected.
-	    - Appends positional data to the shared `positions` dictionary for plotting.
-	"""
-
-	goalMicroDotsToHome = list(goalMicroDotsToIce)[::-1]
-	while Ant.isHomeMode == 0:
-		Ant.direction = random.randint(0, 360)
-		Ant.move(lock, positions)
-		while Ant.distanceTravelled < 20 or (Ant.xPosition != 0 or Ant.yPosition != 0) and Ant.isHomeMode == 0 and Ant.pathHistory != []:
-			while Ant.distanceTravelled < 500:
-				if Ant.huntingForIceOffPathMode == 1:  # if ant is hunting for ice off path
-					Ant.move(lock, positions)  # moves ant in a random direction
-					distanceToIce = math.hypot(Ant.xPosition - Ice.xPosition, Ant.yPosition - Ice.yPosition)  # checks if ant is in range of ice
-					if distanceToIce <= Ice.radius + 10:  # if ant is in range of ice
-						if Ice.found == 0:  # if ice has not been found yet
-							Ice.found = 1  # set ice.found to 1
-							Ant.setModes(0, 0, 1, 0, 0, 0, 0, 0)  # huntingForIceOffPathMode = 0 and discoveredIceMode = 1
-							Ant.iceFinder = 1  # set iceFinder to 1
-						else:  # if ice has been found already
-							Ant.obtainingIceMode = 1  # obtainingIceMode = 1 (gets ice, returns to spot where it detected ice, and adds it on goal return path)
-					else:  # if not in range of ice
-						for dot in range(len(goalMicroDotsToIce)):  # checks if ant is in range of goal dot
-							distanceToGoalDot = math.hypot(Ant.xPosition - goalMicroDotsToIce[dot].xPosition, Ant.yPosition - goalMicroDotsToIce[dot].yPosition)
-							if distanceToGoalDot <= 2:  # if in range of goal dot
-								Ant.moveToPoint(goalMicroDotsToIce[dot].xPosition, goalMicroDotsToIce[dot].yPosition)  # moves ant to goal dot
-								Ant.onGoalPathToIceMode = 1  # onGoalPathToIceMode = 1 (turns ant to path, puts ant on the path)
-							else:  # if not in range of goal dot
-								Ant.huntingForIceOffPathMode = 1  # huntingForIceOffPathMode = 1 (moves ant in a random direction)
-
-				if Ant.discoveredIceMode == 1:
-					Ant.turnToPoint(Ant.pathHistory[-2].xPosition, Ant.pathHistory[-2].yPosition)  # turn ant around to previous dot
-					goalMicroDotsToIce.append(MicroDot(20, -30))  # adds ice to goal microdot stack
-					goalMicroDotsToHome.append(MicroDot(20, -30))  # adds dot to goal microdot to home list
-					Ant.dropGoalMicroDot()  # adds ice to goal microdot stack
-					Ant.setModes(0, 0, 0, 0, 0, 1, 0, 0)  # discoveredIceMode = 0 and goingHomeWithoutIceMode = 1
-					print(f"Ant {Ant.id} has discovered Ice\n")
-
-				if Ant.onGoalPathToIceMode == 1:
-					for dot in range(len(goalMicroDotsToIce)):
-						if Ant.xPosition != goalMicroDotsToIce[-1].xPosition and Ant.yPosition != goalMicroDotsToIce[-1].yPosition:  # if you are at a goal dot, and not at the last goal dot
-							Ant.moveToPoint(goalMicroDotsToIce[dot + 1].xPosition, goalMicroDotsToIce[dot + 1].yPosition)  # moves ant to goal dot
-							print(f"Ant {Ant.id} is moving onto Goal Path\n")
-						else:  # if you are at the last goal dot (ice @ 20,-30)
-							Ant.setModes(0, 0, 0, 1, 0, 0, 0, 0)  # set modes to 0 except obtainingIceMode = 1
-
-				if Ant.obtainingIceMode == 1:
-					Ant.turnToPoint(20, -30)  # turn towards the ice
-					Ant.moveToPoint(20, -30, lock, positions)  # move to the ice
-					Ant.hasIceMode = 1  # obtain Ice and set hasIceMode to 1
-					print(f"Ant {Ant.id} has obtained Ice\n")
-					Ant.obtainingIceMode = 0  # set obtainingIceMode to 0
-					Ice.quantity -= 1  # subtract 1 from the ice quantity
-					if len(goalMicroDotsToHome) > 1:  # Check if there are at least 2 elements
-						Ant.turnToPoint(goalMicroDotsToHome[1].xPosition, goalMicroDotsToHome[1].yPosition)  # turn around to your last dot that is not the ice
-						Ant.moveToPoint(goalMicroDotsToHome[1].xPosition, goalMicroDotsToHome[1].yPosition, lock, positions)  # move to the previous dot
-					Ant.setModes(0, 0, 0, 0, 1, 0, 0, 0)  # set modes to 0 except goingHomeWithIceMode = 1
-
-				if Ant.goingHomeWithIceMode == 1:
-					if Ant.xPosition == goalMicroDotsToHome[-1].xPosition and Ant.yPosition == goalMicroDotsToHome[-1].yPosition:  # if you're at the last return dot
-						Ant.setModes(0, 0, 0, 0, 0, 0, 0, 1)  # set modes to 0 except isHomeMode = 1
-					else:
-						for dot in range(len(goalMicroDotsToHome)):  # for each dot in the return microdot stack
-							if Ant.xPosition == goalMicroDotsToHome[dot].xPosition and Ant.yPosition == goalMicroDotsToHome[dot].yPosition and Ant.xPosition != Lander.xPosition and Ant.yPosition != Lander.yPosition:  # if you're at a return dot and not at the last return dot
-								Ant.moveToPoint(goalMicroDotsToHome[dot + 1].xPosition, goalMicroDotsToHome[dot + 1].yPosition)  # moves ant to goal dot
-							else:
-								Ant.moveToPoint(Lander.xPosition, Lander.yPosition)  # moves ant to home
-								Ant.isHomeMode = 1  # set isHomeMode to 1
-
-				if Ant.goingHomeWithoutIceMode == 1:
-					Ant.goingHome()
-					break
-			else:
-				Ant.goingHome()
+    # Return Phase
+    returning = [ant for ant in ants if ant.mode == "return"]
+    if returning:
+        max_return_steps = max(len(a.retrieval_path) for a in returning)
+        for _ in range(max_return_steps):
+            for ant in returning:
+                if ant.retrieval_path:
+                    ant.move_home()
+                    log_file.write(f"Ant {ant.id} returning via {ant.pos}\n")
+                elif ant.pos == ant.lander_pos and not ant.has_delivered_ice:
+                    ant.deliver_ice()
+                    log_file.write(f"Ant {ant.id} delivered ice to lander\n")
+    else:
+        log_file.write("No ants discovered the ice.\n")
 
 
-ICE_QUANTITY = 9  # number of ice pieces
-Lander = Lander()  # create Lander object
-Ice = Ice()  # create Ice object
-for i in range(1, ICE_QUANTITY + 1, 1):  # create Ant objects
-	Lander.ants.append(Ant(0, 0, i))  # add Ant objects to Lander object
-goalMicroDotsToIce = deque()  # create goal microdot stack
-goalMicroDotsToHome = []  # create goal microdot to home list
+# -----------------------------------------------------------------------------
+# Visualization
+# -----------------------------------------------------------------------------
 
-lock = threading.Lock()  # create lock to lock positions list while adding a position to it
-positions = {ant.id: [(ant.xPosition, ant.yPosition)] for ant in Lander.ants}  # create positions list
-threads = []  # create threads list of ants to move
-for Ant in Lander.ants:  # for each ant in the Lander object
-	thread = threading.Thread(target=antMovement, args=(Ant, lock, positions))  # create a thread for the ant
-	threads.append(thread)  # add the thread to the threads list
-	thread.start()  # start the thread
+plt.figure(figsize=(10, 8))
 
-for thread in threads:
-	thread.join()
+for ant in ants:
+    x, y = zip(*ant.path)
+    if ant.has_delivered_ice:
+        plt.plot(x, y, label=f'Ant {ant.id} (Delivered Ice)', linewidth=2)
+    elif ant.lost:
+        plt.plot(x, y, '--', label=f'Ant {ant.id} (Lost)', linewidth=1)
+    else:
+        plt.plot(x, y, label=f'Ant {ant.id}', linewidth=1)
 
-# Plotting the movements
-plt.figure()
-for ant_id, pos in positions.items():
-	x, y = zip(*pos)
-	plt.plot(x, y, label=f'Ant {ant_id}')
-# Plot the Lander's position
-plt.scatter(Lander.xPosition, Lander.yPosition, color='red', marker='o', s=100, label='Lander')
+# Visualize goal trails (for ants that found the ice)
+for ant in ants:
+    if ant.goal_path:
+        x_goal = [dot.pos[0] for dot in ant.goal_path]
+        y_goal = [dot.pos[1] for dot in ant.goal_path]
+        plt.plot(x_goal, y_goal, 'k--', alpha=0.5)
 
-# Plot the Ice's position
-plt.scatter(Ice.xPosition, Ice.yPosition, color='blue', marker='x', s=100, label='Ice')
+# Mark lander and ice location
+plt.scatter([0], [0], color='black', label='Lander')
+ice_circle = plt.Circle(ICE_LOCATION, ICE_RADIUS, color='blue', alpha=0.5, label='Ice Deposit')
+plt.gca().add_patch(ice_circle)
 
-plt.xlabel('X Position')
-plt.ylabel('Y Position')
-plt.title('Ant Movements')
+plt.title('Ant Ice Retrieval Simulation')
+plt.xlabel('X Position (m)')
+plt.ylabel('Y Position (m)')
 plt.legend()
-plt.legend(bbox_to_anchor=(1, 1), loc='upper left')  # Move the legend to the top left corner
+plt.grid(True)
+plt.axis('equal')
 plt.show()
-print(f"Ice pieces remaining: {Ice.quantity}")
-print("All ants are home")
+
+"""
+===============================================================================
+ End of File: antBiomodeling.py
+===============================================================================
+"""
